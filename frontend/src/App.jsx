@@ -1,13 +1,24 @@
-//src/app.jsx
+// src/App.jsx
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api/api";
 
 const defaultClosing =
   "Once again, thank you for your kind referral. Please do not hesitate to contact me if you require any further information.";
 
+const DRAFT_KEY = "referral_poc_draft_v1";
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
+
+function formatTime(ts) {
+  try {
+    return new Date(ts).toLocaleTimeString();
+  } catch {
+    return "";
+  }
+}
+
 function DraftPreview({
   letterDate,
   referrerBlock,
@@ -19,7 +30,7 @@ function DraftPreview({
   return (
     <div style={{ border: "1px solid #ddd", padding: 16, marginTop: 24 }}>
       <div style={{ fontSize: 12, opacity: 0.8 }}>
-        (Draft preview â not PDF formatting yet)
+        (Draft preview — not PDF formatting yet)
       </div>
 
       <div style={{ marginTop: 12, textAlign: "right" }}>
@@ -34,9 +45,7 @@ function DraftPreview({
         {patientReLine || "Re: [Patient, DOB, Address]"}
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        {greeting || "Dear Dr ___,"}
-      </div>
+      <div style={{ marginTop: 16 }}>{greeting || "Dear Dr ___,"}</div>
 
       <div style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>
         {bodyText || "[Letter body]"}
@@ -55,7 +64,7 @@ function DraftPreview({
 }
 
 export default function App() {
-  // Form state (minimum fields for PoC)
+  // Form state
   const [letterDate, setLetterDate] = useState(todayISO());
   const [referrerBlock, setReferrerBlock] = useState("");
   const [patientReLine, setPatientReLine] = useState("");
@@ -63,20 +72,103 @@ export default function App() {
   const [bodyText, setBodyText] = useState("");
   const [closingText, setClosingText] = useState(defaultClosing);
 
-  // Simple history list (optional but useful)
+  // History list
   const [letters, setLetters] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // Helper: if greeting empty, try auto-fill from referrerBlock
+  // ✅ autosave indicator state
+  const [lastAutosavedAt, setLastAutosavedAt] = useState(null);
+
+  // --- Local draft helpers ---
+  function buildDraftPayload() {
+    return {
+      letterDate,
+      referrerBlock,
+      patientReLine,
+      greeting,
+      bodyText,
+      closingText,
+      savedAt: new Date().toISOString(),
+    };
+  }
+
+  function hasAnyContent() {
+    return (
+      referrerBlock.trim() ||
+      patientReLine.trim() ||
+      greeting.trim() ||
+      bodyText.trim() ||
+      closingText.trim()
+    );
+  }
+
+  function saveDraftToLocal({ showMessage }) {
+    const draft = buildDraftPayload();
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+
+    // update indicator time
+    setLastAutosavedAt(draft.savedAt);
+
+    if (showMessage) {
+      setMsg(`Draft saved locally (${new Date(draft.savedAt).toLocaleString()}).`);
+    }
+  }
+
+  function clearDraftLocal() {
+    localStorage.removeItem(DRAFT_KEY);
+    setLastAutosavedAt(null);
+    setMsg("Local draft cleared.");
+  }
+
+  // Auto-restore draft on load
+  useEffect(() => {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+
+    try {
+      const d = JSON.parse(raw);
+
+      if (typeof d.letterDate === "string") setLetterDate(d.letterDate);
+      if (typeof d.referrerBlock === "string") setReferrerBlock(d.referrerBlock);
+      if (typeof d.patientReLine === "string") setPatientReLine(d.patientReLine);
+      if (typeof d.greeting === "string") setGreeting(d.greeting);
+      if (typeof d.bodyText === "string") setBodyText(d.bodyText);
+      if (typeof d.closingText === "string") setClosingText(d.closingText);
+
+      if (d.savedAt) {
+        setLastAutosavedAt(d.savedAt);
+        setMsg(`Loaded local draft (saved ${new Date(d.savedAt).toLocaleString()}).`);
+      } else {
+        setMsg("Loaded local draft.");
+      }
+    } catch {
+      localStorage.removeItem(DRAFT_KEY);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-fill greeting (optional)
   useEffect(() => {
     if (greeting.trim()) return;
-    // crude guess: take last word of first line as surname
+
     const firstLine = referrerBlock.split("\n")[0]?.trim() || "";
     const parts = firstLine.split(" ").filter(Boolean);
     const surname = parts.length >= 2 ? parts[parts.length - 1] : "";
     if (surname) setGreeting(`Dear Dr ${surname},`);
   }, [referrerBlock, greeting]);
+
+  // ✅ Auto-save while typing (debounced, silent)
+  useEffect(() => {
+    if (!hasAnyContent()) return;
+
+    const t = setTimeout(() => {
+      saveDraftToLocal({ showMessage: false }); // silent autosave
+    }, 800);
+
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [letterDate, referrerBlock, patientReLine, greeting, bodyText, closingText]);
 
   async function loadLetters() {
     try {
@@ -84,7 +176,7 @@ export default function App() {
       setLetters(res.data || []);
     } catch (e) {
       console.error(e);
-      setMsg("Could not load letters. Is the backend running on :3000?");
+      setMsg("Could not load letters. Is the backend running?");
     }
   }
 
@@ -92,7 +184,7 @@ export default function App() {
     loadLetters();
   }, []);
 
-  const canSave = useMemo(() => {
+  const canSaveToDb = useMemo(() => {
     return (
       letterDate &&
       referrerBlock.trim() &&
@@ -103,12 +195,12 @@ export default function App() {
     );
   }, [letterDate, referrerBlock, patientReLine, greeting, bodyText, closingText]);
 
-  async function onSave(e) {
+  async function onSaveToDb(e) {
     e.preventDefault();
     setMsg("");
 
-    if (!canSave) {
-      setMsg("Please fill in all required fields before saving.");
+    if (!canSaveToDb) {
+      setMsg("Please fill in all required fields before saving to the database.");
       return;
     }
 
@@ -125,7 +217,11 @@ export default function App() {
       };
 
       const res = await api.post("/letters", payload);
-      setMsg(`Saved draft. Letter id: ${res.data?.id}`);
+      setMsg(`Saved to database. Letter id: ${res.data?.id}`);
+
+      // optional: also save a local snapshot when DB save succeeds
+      saveDraftToLocal({ showMessage: false });
+
       await loadLetters();
     } catch (e) {
       console.error(e);
@@ -136,7 +232,7 @@ export default function App() {
     }
   }
 
-  function onClear() {
+  function onClearForm() {
     setLetterDate(todayISO());
     setReferrerBlock("");
     setPatientReLine("");
@@ -144,15 +240,32 @@ export default function App() {
     setBodyText("");
     setClosingText(defaultClosing);
     setMsg("");
+    // keep local draft as-is unless you also click Clear Draft
   }
 
   return (
-    <div style={{ maxWidth: 900, margin: "24px auto", padding: 16, fontFamily: "system-ui" }}>
-      <h1>Referral Response Letter - POC</h1>
+    <div
+      style={{
+        maxWidth: 900,
+        margin: "24px auto",
+        padding: 16,
+        fontFamily: "system-ui",
+      }}
+    >
+      <h1 style={{ marginBottom: 6 }}>Referral Response Letter - POC</h1>
 
-      <form onSubmit={onSave} style={{ display: "grid", gap: 12 }}>
+      {/* ✅ Autosave indicator */}
+      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 16 }}>
+        {lastAutosavedAt ? (
+          <span>Autosaved ✓ {formatTime(lastAutosavedAt)}</span>
+        ) : (
+          <span>No local draft saved yet.</span>
+        )}
+      </div>
+
+      <form onSubmit={onSaveToDb} style={{ display: "grid", gap: 12 }}>
         <label>
-          Letter date (required)
+          Letter date (required for DB save)
           <input
             type="date"
             value={letterDate}
@@ -162,7 +275,7 @@ export default function App() {
         </label>
 
         <label>
-          Referrer block (required)
+          Referrer block (required for DB save)
           <textarea
             rows={4}
             placeholder={"Dr Jane Smith\nClinic Name\nAddress...\nEmail..."}
@@ -173,7 +286,7 @@ export default function App() {
         </label>
 
         <label>
-          Patient Reference Info   (required)
+          Patient Reference Info (required for DB save)
           <textarea
             rows={2}
             placeholder={"Re: Patient Name, DOB: dd/mm/yyyy, Address..."}
@@ -184,7 +297,7 @@ export default function App() {
         </label>
 
         <label>
-          Greeting (required)
+          Greeting (required for DB save)
           <input
             type="text"
             placeholder="Dear Dr Smith,"
@@ -195,7 +308,7 @@ export default function App() {
         </label>
 
         <label>
-          Letter body (required)
+          Letter body (required for DB save)
           <textarea
             rows={10}
             placeholder="Type the Treatment content here...up to 10 rows"
@@ -206,7 +319,7 @@ export default function App() {
         </label>
 
         <label>
-          Closing paragraph (required)
+          Closing paragraph (required for DB save)
           <textarea
             rows={4}
             value={closingText}
@@ -215,13 +328,40 @@ export default function App() {
           />
         </label>
 
-        <div style={{ display: "flex", gap: 12 }}>
-          <button type="submit" disabled={!canSave || busy} style={{ padding: "10px 14px" }}>
-            {busy ? "Saving..." : "Save Draft"}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => saveDraftToLocal({ showMessage: true })}
+            disabled={busy}
+            style={{ padding: "10px 14px" }}
+          >
+            Save Draft (Local)
           </button>
 
-          <button type="button" onClick={onClear} style={{ padding: "10px 14px" }}>
-            Clear
+          <button
+            type="button"
+            onClick={clearDraftLocal}
+            disabled={busy}
+            style={{ padding: "10px 14px" }}
+          >
+            Clear Draft (Local)
+          </button>
+
+          <button
+            type="submit"
+            disabled={!canSaveToDb || busy}
+            style={{ padding: "10px 14px" }}
+          >
+            {busy ? "Saving..." : "Save to Database"}
+          </button>
+
+          <button
+            type="button"
+            onClick={onClearForm}
+            disabled={busy}
+            style={{ padding: "10px 14px" }}
+          >
+            Clear Form
           </button>
         </div>
 
@@ -229,18 +369,21 @@ export default function App() {
       </form>
 
       <hr style={{ margin: "24px 0" }} />
-<DraftPreview
-  letterDate={letterDate}
-  referrerBlock={referrerBlock}
-  patientReLine={patientReLine}
-  greeting={greeting}
-  bodyText={bodyText}
-  closingText={closingText}
-/>
 
+      <DraftPreview
+        letterDate={letterDate}
+        referrerBlock={referrerBlock}
+        patientReLine={patientReLine}
+        greeting={greeting}
+        bodyText={bodyText}
+        closingText={closingText}
+      />
 
       <h2>History (latest)</h2>
-      <button onClick={loadLetters} style={{ padding: "8px 12px", marginBottom: 12 }}>
+      <button
+        onClick={loadLetters}
+        style={{ padding: "8px 12px", marginBottom: 12 }}
+      >
         Refresh list
       </button>
 
@@ -248,9 +391,11 @@ export default function App() {
         {letters.map((l) => (
           <div key={l.id} style={{ border: "1px solid #ddd", padding: 12 }}>
             <div>
-              <b>#{l.id}</b> â {l.letter_date} â <i>{l.status}</i>
+              <b>#{l.id}</b> — {l.letter_date} — <i>{l.status}</i>
             </div>
-            <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{l.patient_re_line}</div>
+            <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>
+              {l.patient_re_line}
+            </div>
           </div>
         ))}
         {!letters.length && <div>No letters yet.</div>}
