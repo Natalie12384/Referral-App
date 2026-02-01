@@ -11,3 +11,4 @@ CREATE TABLE IF NOT EXISTS letters (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+

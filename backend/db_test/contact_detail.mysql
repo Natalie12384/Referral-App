@@ -1,0 +1,40 @@
+-- Drop tables if they exist
+DROP TABLE IF EXISTS contact_details;
+DROP TABLE IF EXISTS practitioner;
+DROP TABLE IF EXISTS practice;
+
+-- Practitioner table
+CREATE TABLE practitioner (
+   ahpra_no INT NOT NULL,
+   first_name VARCHAR(100) NOT NULL,
+   last_name VARCHAR(100) NOT NULL,
+   salutation VARCHAR(20) NOT NULL,
+   speciality VARCHAR(100) NOT NULL,
+   PRIMARY KEY (ahpra_no)
+);
+
+-- Practice table
+CREATE TABLE practice (
+   practice_id INT NOT NULL AUTO_INCREMENT,
+   practice_name VARCHAR(150) NOT NULL,
+   phone_line_no INT NOT NULL,
+   phone_area_no INT NOT NULL,
+   street_name VARCHAR(150) NOT NULL,
+   street_no INT NOT NULL,
+   suburb VARCHAR(100) NOT NULL,
+   street_type CHAR(1) NOT NULL,
+   post_code INT NOT NULL,
+   practice_email VARCHAR(150) NOT NULL,
+   PRIMARY KEY (practice_id)
+) ;
+
+-- Contact details table
+CREATE TABLE contact_details (
+    ahpra_no INT NOT NULL,
+    practice_id INT NOT NULL,
+    practitioner_email VARCHAR(150) NOT NULL,
+    practitioner_phone_no VARCHAR(20) NOT NULL,
+    PRIMARY KEY (ahpra_no, practice_id),
+    FOREIGN KEY (ahpra_no) REFERENCES practitioner(ahpra_no) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (practice_id) REFERENCES practice(practice_id) ON DELETE CASCADE ON UPDATE CASCADE
+);
